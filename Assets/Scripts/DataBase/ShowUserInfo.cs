@@ -32,13 +32,14 @@ public class ShowUserInfo : MonoBehaviour
     //Метод отвечающий за сохраниение в игре
     private void OnApplicationQuit()
     {
-        if (playerController != null)
+        PlayerDataSaver saver = FindObjectOfType<PlayerDataSaver>();
+        if (saver != null)
         {
-            playerController.SavePlayerData();
+            saver.SaveToDB(MySQLLogin.LoggedUserId);
         }
         else
         {
-            Debug.LogWarning("PlayerController не найден, данные не были сохранены.");
+            Debug.LogWarning("PlayerDataSaver не найден, данные не были сохранены.");
         }
     }
 }

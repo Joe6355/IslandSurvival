@@ -1,6 +1,3 @@
-using MySql.Data.MySqlClient;
-using System.Collections;
-using System.Collections.Generic;
 using UnityEngine;
 using UnityEngine.UI;
 
@@ -21,32 +18,32 @@ public class PlayerController : MonoBehaviour
     public float mood = 100f;
 
     [Header("Скорости изменения статусов")]
-    // При движении стамина уменьшается со скоростью 1f/с
     public float staminaDecreaseRate = 1f;
-    // В покое стамина восстанавливается со скоростью 0.8f/с
     public float staminaRecoveryRate = 0.8f;
-    // Настроение всегда падает со скоростью 0.1f/с
     public float moodDecreaseRate = 0.1f;
+    public float hpRegenRate = 2f; // HP-реген, если mood>50 и stamina>50
 
     [Header("UI Элементы")]
     [SerializeField] private Image healthBar;
     [SerializeField] private Image staminaBar;
     [SerializeField] private Image moodBar;
 
+    [Header("Время (День/Ночь)")]
+    public float timeScale = 1f;   // 1f => 1 минута за 1 сек IRL
+    public float currentHour = 7f;   // 0..24
+    public int dayCount = 1;
+    public bool isDay;
+
+    [Header("Доп. Параметры (из БД)")]
+    public int kills;
+    public int resourcesGathered;
+    public int crafts;
+    public int prayers;
+    public float playtimeMinutes; // Сколько реальных минут игрок провёл
+
     private void Start()
     {
         rb = GetComponent<Rigidbody2D>();
-
-        // Автоматическое сохранение каждые 10 секунд
-        InvokeRepeating("SavePlayerData", 10f, 10f);
-    }
-
-    private void MoveInput()
-    {
-        // Получаем оси с джойстика
-        float horizontal = joystick.Horizontal * moveSpeed;
-        float vertical = joystick.Vertical * moveSpeed;
-        movement = new Vector2(horizontal, vertical);
     }
 
     private void FixedUpdate()
@@ -54,36 +51,52 @@ public class PlayerController : MonoBehaviour
         MoveInput();
         rb.velocity = movement;
 
-        // Обновляем параметры игрока
         UpdateStats();
-        // Обновляем визуальное отображение полос
         UpdateUI();
+    }
+
+    private void Update()
+    {
+        // Считаем игровое время (день/ночь)
+        UpdateGameTime(Time.deltaTime);
+
+        // Прибавляем реальное время в playtimeMinutes
+        // Time.deltaTime (сек) => делим на 60, получаем минуты
+        playtimeMinutes += Time.deltaTime / 60f;
+    }
+
+    private void MoveInput()
+    {
+        float horizontal = joystick.Horizontal * moveSpeed;
+        float vertical = joystick.Vertical * moveSpeed;
+        movement = new Vector2(horizontal, vertical);
     }
 
     private void UpdateStats()
     {
-        // Если игрок двигается (учитываем небольшой порог)
+        // Стамина
         if (movement.magnitude > 0.1f)
-        {
             stamina -= staminaDecreaseRate * Time.fixedDeltaTime;
-        }
-        else // В покое восстанавливаем стамину
-        {
+        else
             stamina += staminaRecoveryRate * Time.fixedDeltaTime;
-        }
 
-        // Постоянное снижение настроения
+        // Настроение
         mood -= moodDecreaseRate * Time.fixedDeltaTime;
 
-        // Ограничиваем значения от 0 до максимума
+        // HP-реген (если mood>50 и stamina>50)
+        if (mood > 50f && stamina > 50f)
+        {
+            health += hpRegenRate * Time.fixedDeltaTime;
+            health = Mathf.Clamp(health, 0f, maxHealth);
+        }
+
+        // Ограничиваем стамину, настроение
         stamina = Mathf.Clamp(stamina, 0, maxStamina);
         mood = Mathf.Clamp(mood, 0, maxMood);
     }
 
     private void UpdateUI()
     {
-        // Обновляем значение fillAmount для каждого Image,
-        // вычисляя его как отношение текущего значения к максимальному
         if (healthBar != null)
             healthBar.fillAmount = health / maxHealth;
         if (staminaBar != null)
@@ -92,71 +105,62 @@ public class PlayerController : MonoBehaviour
             moodBar.fillAmount = mood / maxMood;
     }
 
-    public void LoadPlayerData(float hp, float stamina, float mood, float posX, float posY)
+    private void UpdateGameTime(float deltaSec)
     {
-        Debug.Log($"[PlayerController] Загружены данные: HP={hp}, Stamina={stamina}, Mood={mood}, PosX={posX}, PosY={posY}");
+        float hoursPerSec = timeScale / 60f;
+        currentHour += hoursPerSec * deltaSec;
 
-        this.health = hp;
-        this.stamina = stamina;
-        this.mood = mood;
+        if (currentHour >= 24f)
+        {
+            currentHour -= 24f;
+            dayCount++;
+        }
+
+        // День: 8..20
+        if (currentHour >= 8f && currentHour < 20f)
+            isDay = true;
+        else
+            isDay = false;
+    }
+
+    /// <summary>
+    /// "Спать": переносим на 8 AM, +1 день
+    /// </summary>
+    public void GoToSleep()
+    {
+        currentHour = 8f;
+        dayCount++;
+    }
+
+    /// <summary>
+    /// Устанавливаем данные, пришедшие из БД
+    /// </summary>
+    public void SetPlayerData(
+        float hp, float stamina, float mood,
+        float posX, float posY,
+        int dayCount, float hour,
+        int kills, int resourcesGathered,
+        int crafts, int prayers,
+        float playtime
+    )
+    {
+        // Здоровье, стамина, настроение
+        this.health = Mathf.Clamp(hp, 0, maxHealth);
+        this.stamina = Mathf.Clamp(stamina, 0, maxStamina);
+        this.mood = Mathf.Clamp(mood, 0, maxMood);
+
+        // Позиция
         transform.position = new Vector3(posX, posY, 0);
 
-        this.stamina = Mathf.Clamp(this.stamina, 0, maxStamina);
-        this.mood = Mathf.Clamp(this.mood, 0, maxMood);
+        // День/время
+        this.dayCount = dayCount;
+        this.currentHour = hour;
 
-        UpdateUI();
+        // Доп. поля
+        this.kills = kills;
+        this.resourcesGathered = resourcesGathered;
+        this.crafts = crafts;
+        this.prayers = prayers;
+        this.playtimeMinutes = playtime;
     }
-
-    public void SavePlayerData()
-    {
-        Debug.Log("[PlayerController] SavePlayerData() вызван!");
-        StartCoroutine(SendPlayerDataToServer());
-        if (string.IsNullOrEmpty(MySQLLogin.ConnectionString))
-        {
-            Debug.LogError("Ошибка: Строка подключения пуста. Данные не сохранены.");
-            return;
-        }
-    }
-
-    private IEnumerator SendPlayerDataToServer()
-    {
-        using (MySqlConnection conn = new MySqlConnection(MySQLLogin.ConnectionString))
-        {
-            try
-            {
-                conn.Open();
-
-                string updateQuery = @"
-                UPDATE player_data
-                SET hp = @hp, stamina = @stamina, mood = @mood, pos_x = @posX, pos_y = @posY
-                WHERE user_id = @userId;
-            ";
-
-                using (MySqlCommand updateCmd = new MySqlCommand(updateQuery, conn))
-                {
-                    updateCmd.Parameters.AddWithValue("@userId", MySQLLogin.LoggedUserId);
-                    updateCmd.Parameters.AddWithValue("@hp", health);
-                    updateCmd.Parameters.AddWithValue("@stamina", stamina);
-                    updateCmd.Parameters.AddWithValue("@mood", mood);
-                    updateCmd.Parameters.AddWithValue("@posX", transform.position.x);
-                    updateCmd.Parameters.AddWithValue("@posY", transform.position.y);
-
-                    int rowsAffected = updateCmd.ExecuteNonQuery();
-                    Debug.Log($"[SQL] {rowsAffected} строк(и) обновлено.");
-
-                    if (rowsAffected == 0)
-                    {
-                        Debug.LogError("[SQL] Ошибка: `UPDATE` не изменил данные! Возможно, записи нет в базе.");
-                    }
-                }
-            }
-            catch (MySqlException ex)
-            {
-                Debug.LogError("[SQL] Ошибка сохранения данных игрока: " + ex.Message);
-            }
-        }
-        yield return null;
-    }
-
-
 }
