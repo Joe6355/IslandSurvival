@@ -1,3 +1,4 @@
+using MySql.Data.MySqlClient;
 using System.Collections;
 using System.Collections.Generic;
 using UnityEngine;
@@ -35,6 +36,9 @@ public class PlayerController : MonoBehaviour
     private void Start()
     {
         rb = GetComponent<Rigidbody2D>();
+
+        // Автоматическое сохранение каждые 10 секунд
+        InvokeRepeating("SavePlayerData", 10f, 10f);
     }
 
     private void MoveInput()
@@ -87,4 +91,72 @@ public class PlayerController : MonoBehaviour
         if (moodBar != null)
             moodBar.fillAmount = mood / maxMood;
     }
+
+    public void LoadPlayerData(float hp, float stamina, float mood, float posX, float posY)
+    {
+        Debug.Log($"[PlayerController] Загружены данные: HP={hp}, Stamina={stamina}, Mood={mood}, PosX={posX}, PosY={posY}");
+
+        this.health = hp;
+        this.stamina = stamina;
+        this.mood = mood;
+        transform.position = new Vector3(posX, posY, 0);
+
+        this.stamina = Mathf.Clamp(this.stamina, 0, maxStamina);
+        this.mood = Mathf.Clamp(this.mood, 0, maxMood);
+
+        UpdateUI();
+    }
+
+    public void SavePlayerData()
+    {
+        Debug.Log("[PlayerController] SavePlayerData() вызван!");
+        StartCoroutine(SendPlayerDataToServer());
+        if (string.IsNullOrEmpty(MySQLLogin.ConnectionString))
+        {
+            Debug.LogError("Ошибка: Строка подключения пуста. Данные не сохранены.");
+            return;
+        }
+    }
+
+    private IEnumerator SendPlayerDataToServer()
+    {
+        using (MySqlConnection conn = new MySqlConnection(MySQLLogin.ConnectionString))
+        {
+            try
+            {
+                conn.Open();
+
+                string updateQuery = @"
+                UPDATE player_data
+                SET hp = @hp, stamina = @stamina, mood = @mood, pos_x = @posX, pos_y = @posY
+                WHERE user_id = @userId;
+            ";
+
+                using (MySqlCommand updateCmd = new MySqlCommand(updateQuery, conn))
+                {
+                    updateCmd.Parameters.AddWithValue("@userId", MySQLLogin.LoggedUserId);
+                    updateCmd.Parameters.AddWithValue("@hp", health);
+                    updateCmd.Parameters.AddWithValue("@stamina", stamina);
+                    updateCmd.Parameters.AddWithValue("@mood", mood);
+                    updateCmd.Parameters.AddWithValue("@posX", transform.position.x);
+                    updateCmd.Parameters.AddWithValue("@posY", transform.position.y);
+
+                    int rowsAffected = updateCmd.ExecuteNonQuery();
+                    Debug.Log($"[SQL] {rowsAffected} строк(и) обновлено.");
+
+                    if (rowsAffected == 0)
+                    {
+                        Debug.LogError("[SQL] Ошибка: `UPDATE` не изменил данные! Возможно, записи нет в базе.");
+                    }
+                }
+            }
+            catch (MySqlException ex)
+            {
+                Debug.LogError("[SQL] Ошибка сохранения данных игрока: " + ex.Message);
+            }
+        }
+        yield return null;
+    }
+
+
 }

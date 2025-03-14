@@ -2,6 +2,7 @@ using UnityEngine;
 using TMPro;
 using MySql.Data.MySqlClient;
 using UnityEngine.SceneManagement;
+using System.Collections;
 
 public class MySQLLogin : MonoBehaviour
 {
@@ -25,19 +26,39 @@ public class MySQLLogin : MonoBehaviour
     private string passwordDB = "StrongPass123!";
     private string port = "3306";
 
-    private string connectionString;
+    public static string ConnectionString { get; private set; }
 
+    public ShowUserInfo showUserInfo;
     // Храним данные вошедшего пользователя (для демонстрации).
     // В реальном проекте можно сделать Singleton GameManager или PlayerSession.
     public static int LoggedUserId = -1;
     public static string LoggedNickname = "";
 
+    private static MySQLLogin instance;
+
+    private void Awake()
+    {
+        if (instance == null)
+        {
+            instance = this;
+            DontDestroyOnLoad(gameObject); // Оставляем объект навсегда
+        }
+        else
+        {
+            Debug.Log("[MySQLLogin] Второй экземпляр обнаружен. Удаляем новый объект.");
+            Destroy(gameObject); // Удаляем повторный объект
+            return;
+        }
+    }
     private void Start()
     {
+
+        showUserInfo = FindObjectOfType<ShowUserInfo>();
         // Формируем строку подключения один раз.
-        connectionString = $"Server={server};Database={database};User ID={userID};Password={passwordDB};Port={port};SslMode=none;";
+        ConnectionString = $"Server={server};Database={database};User ID={userID};Password={passwordDB};Port={port};SslMode=none;CharSet=utf8mb4;";
 
         TestConnection();
+        Debug.Log("[MySQLLogin] Объект загружен. ID объекта: " + gameObject.GetInstanceID());
     }
 
 
@@ -45,7 +66,7 @@ public class MySQLLogin : MonoBehaviour
 {
     try
     {
-        using (MySqlConnection conn = new MySqlConnection(connectionString))
+        using (MySqlConnection conn = new MySqlConnection(ConnectionString))
         {
             conn.Open();
             Debug.Log("Подключение к базе прошло успешно!");
@@ -78,7 +99,7 @@ public class MySQLLogin : MonoBehaviour
             return;
         }
 
-        using (MySqlConnection conn = new MySqlConnection(connectionString))
+        using (MySqlConnection conn = new MySqlConnection(ConnectionString))
         {
             try
             {
@@ -125,13 +146,12 @@ public class MySQLLogin : MonoBehaviour
 
                     // 3) Создаём запись в player_data c начальными значениями
                     string insertDataQuery = @"
-                        INSERT INTO player_data (user_id)
-                        VALUES (@uID);
-                    ";
-
+                        INSERT INTO player_data (user_id, hp, stamina, mood, pos_x, pos_y)
+                        VALUES (@userId, 100, 100, 100, 0, 0);
+";
                     using (MySqlCommand insertDataCmd = new MySqlCommand(insertDataQuery, conn))
                     {
-                        insertDataCmd.Parameters.AddWithValue("@uID", newUserId);
+                        insertDataCmd.Parameters.AddWithValue("@userId", newUserId);
                         insertDataCmd.ExecuteNonQuery();
                     }
 
@@ -151,34 +171,30 @@ public class MySQLLogin : MonoBehaviour
     /// </summary>
     public void OnLoginButton()
     {
-        // Считываем данные из полей для авторизации
-        string login = loginEmailOrNickField.text; // Может быть email или ник
+        Debug.Log("[MySQLLogin] Нажата кнопка авторизации.");
+
+        string login = loginEmailOrNickField.text;
         string pass = loginPasswordField.text;
 
         if (string.IsNullOrEmpty(login) || string.IsNullOrEmpty(pass))
         {
-            errorTextLog.text = "Заполните все поля для авторизации!";
+            Debug.LogWarning("[MySQLLogin] Ошибка: Не все поля заполнены!");
+            errorTextLog.text = "Заполните все поля!";
             return;
         }
 
-        using (MySqlConnection conn = new MySqlConnection(connectionString))
+        using (MySqlConnection conn = new MySqlConnection(ConnectionString))
         {
             try
             {
                 conn.Open();
+                Debug.Log("[MySQLLogin] Подключение к базе успешно!");
 
-                // Получаем id, пароль и nickname
-                string query = @"
-                    SELECT id, password, nickname
-                    FROM users
-                    WHERE email = @login OR nickname = @login
-                    LIMIT 1;
-                ";
+                string query = "SELECT id, password, nickname FROM users WHERE email = @login OR nickname = @login LIMIT 1;";
 
                 using (MySqlCommand cmd = new MySqlCommand(query, conn))
                 {
                     cmd.Parameters.AddWithValue("@login", login);
-
                     using (MySqlDataReader reader = cmd.ExecuteReader())
                     {
                         if (reader.Read())
@@ -187,24 +203,24 @@ public class MySQLLogin : MonoBehaviour
                             string dbPassword = reader.GetString("password");
                             string dbNick = reader.GetString("nickname");
 
-                            if (dbPassword == pass) // В реальном проекте нужно сравнивать хэши
+                            if (dbPassword == pass)
                             {
-                                // Авторизация успешна!
                                 LoggedUserId = userId;
                                 LoggedNickname = dbNick;
 
+                                Debug.Log("[MySQLLogin] Авторизация успешна!");
                                 errorTextLog.text = "Авторизация успешна!";
-
-                                // Переходим на сцену (1) — должна быть добавлена в Build Settings
-                                SceneManager.LoadScene(1);
+                                StartCoroutine(DelayedSceneLoad(1, userId));
                             }
                             else
                             {
+                                Debug.LogWarning("[MySQLLogin] Ошибка: Неверный пароль!");
                                 errorTextLog.text = "Неверный пароль!";
                             }
                         }
                         else
                         {
+                            Debug.LogWarning("[MySQLLogin] Ошибка: Пользователь не найден!");
                             errorTextLog.text = "Пользователь не найден!";
                         }
                     }
@@ -212,8 +228,110 @@ public class MySQLLogin : MonoBehaviour
             }
             catch (MySqlException ex)
             {
+                Debug.LogError("[MySQLLogin] Ошибка подключения: " + ex.Message);
                 errorTextLog.text = "Ошибка подключения: " + ex.Message;
             }
         }
     }
+
+    //Метод отвечающий за задержку перед загрузкой(нужжно будет доработать)
+    private IEnumerator DelayedSceneLoad(int sceneIndex, int userId)
+    {
+        Debug.Log($"[MySQLLogin] Начинаем загрузку сцены {sceneIndex} для пользователя {userId}");
+
+        SceneManager.LoadScene(sceneIndex);
+        yield return new WaitForSeconds(1.5f); // Даём сцене загрузиться
+
+        Debug.Log("[MySQLLogin] Сцена загружена. Ищем PlayerController...");
+
+        // Ждём появления PlayerController
+        PlayerController player = null;
+        float timeout = 5f;
+        while (player == null && timeout > 0)
+        {
+            player = FindObjectOfType<PlayerController>();
+            yield return new WaitForSeconds(0.5f);
+            timeout -= 0.5f;
+        }
+
+        if (player != null)
+        {
+            Debug.Log("[MySQLLogin] PlayerController найден! Загружаем данные...");
+            StartCoroutine(LoadPlayerData(userId));
+        }
+        else
+        {
+            Debug.LogError("[MySQLLogin] Ошибка: PlayerController НЕ найден!");
+        }
+    }
+
+
+
+    private IEnumerator LoadPlayerData(int userId)
+    {
+        Debug.Log($"[MySQLLogin] Загружаем данные для user_id={userId}");
+
+        // Показываем загрузочный экран
+        LoadingScreenManager.Instance.ShowLoadingScreen();
+
+        using (MySqlConnection conn = new MySqlConnection(ConnectionString))
+        {
+            try
+            {
+                conn.Open();
+                Debug.Log("[MySQLLogin] Подключение к БД успешно!");
+
+                string query = @"
+                SELECT hp, stamina, mood, pos_x, pos_y
+                FROM player_data
+                WHERE user_id = @userId
+                LIMIT 1;
+            ";
+
+                using (MySqlCommand cmd = new MySqlCommand(query, conn))
+                {
+                    cmd.Parameters.AddWithValue("@userId", userId);
+
+                    using (MySqlDataReader reader = cmd.ExecuteReader())
+                    {
+                        if (reader.Read())
+                        {
+                            float hp = reader.GetFloat("hp");
+                            float stamina = reader.GetFloat("stamina");
+                            float mood = reader.GetFloat("mood");
+                            float posX = reader.GetFloat("pos_x");
+                            float posY = reader.GetFloat("pos_y");
+
+                            Debug.Log($"[MySQLLogin] Данные из БД: HP={hp}, Stamina={stamina}, Mood={mood}, PosX={posX}, PosY={posY}");
+
+                            PlayerController player = FindObjectOfType<PlayerController>();
+                            if (player != null)
+                            {
+                                Debug.Log("[MySQLLogin] Передаём данные в PlayerController.");
+                                player.LoadPlayerData(hp, stamina, mood, posX, posY);
+                            }
+                            else
+                            {
+                                Debug.LogError("[MySQLLogin] Ошибка: PlayerController не найден!");
+                            }
+                        }
+                        else
+                        {
+                            Debug.LogError("[MySQLLogin] Ошибка: Данные игрока не найдены!");
+                        }
+                    }
+                }
+            }
+            catch (MySqlException ex)
+            {
+                Debug.LogError("[MySQLLogin] Ошибка загрузки данных: " + ex.Message);
+            }
+        }
+
+        // Скрываем загрузочный экран
+        LoadingScreenManager.Instance.HideLoadingScreen();
+
+        yield return null;
+    }
+
 }

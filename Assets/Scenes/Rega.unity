@@ -961,6 +961,7 @@ MonoBehaviour:
   loginPasswordField: {fileID: 1779308074}
   errorText: {fileID: 2124747674}
   errorTextLog: {fileID: 1181995210}
+  showUserInfo: {fileID: 0}
 --- !u!4 &448400397
 Transform:
   m_ObjectHideFlags: 0

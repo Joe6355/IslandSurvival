@@ -1,23 +1,44 @@
 using UnityEngine;
 using TMPro;
+using MySql.Data.MySqlClient;
+using System.Collections;
 
 public class ShowUserInfo : MonoBehaviour
 {
     [SerializeField] private TMP_Text userInfoText;
 
+    [Header("Сохраниение данных при выходе из игры")]
+    private PlayerController playerController;
+    
     private void Start()
     {
+        
+        playerController = FindObjectOfType<PlayerController>();
+
         // Выводим данные из MySQLLogin (статические поля)
         int userId = MySQLLogin.LoggedUserId;
         string nick = MySQLLogin.LoggedNickname;
 
         if (userId > 0)
         {
-            userInfoText.text = $"Добро пожаловать, {nick}!\nВаш ID: {userId}";
+            userInfoText.text = $"{nick} -- id {userId}";
         }
         else
         {
             userInfoText.text = "Ошибка: пользователь не авторизован или данные не получены.";
+        }
+    }
+
+    //Метод отвечающий за сохраниение в игре
+    private void OnApplicationQuit()
+    {
+        if (playerController != null)
+        {
+            playerController.SavePlayerData();
+        }
+        else
+        {
+            Debug.LogWarning("PlayerController не найден, данные не были сохранены.");
         }
     }
 }
