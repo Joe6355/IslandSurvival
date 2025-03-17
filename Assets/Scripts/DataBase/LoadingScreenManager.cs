@@ -12,8 +12,8 @@ public class LoadingScreenManager : MonoBehaviour
 
     [Header("Подсказка вызова")]
     [TextArea(3,5)]
-    [SerializeField] private string usageInfo = 
-        "Вызывай LoadingScreenManager.Show() / LoadingScreenManager.Hide() в любом месте кода.";
+    //[SerializeField] private string usageInfo = 
+    //    "Вызывай LoadingScreenManager.Show() / LoadingScreenManager.Hide() в любом месте кода.";
 
     private CanvasGroup canvasGroup; // Для плавной анимации исчезновения
     private Coroutine animateTextCoroutine; // Ссылка на корутину AnimateLoadingText
